@@ -191,18 +191,120 @@ void allocaLocals(struct quadline **ptr) {
     }
 }
 
+void createAssign(struct quadline *ptr) {
+    struct id_entry *id_ptr;
+    llvm::Value *val;
+
+    id_ptr = install(ptr->items[0], LOCAL);
+    id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getInt32Ty(
+            TheContext), nullptr, id_ptr->i_name);
+    val = llvm::ConstantInt::get(TheContext,
+             APInt(32, llvm::StringRef(ptr->items[2]), 10));
+    Builder.CreateStore(val, id_ptr->v.v);
+}
+
 void createLoad(struct quadline *ptr) {
     auto loadAddr = lookup(ptr->items[3], LOCAL);
     auto loadVal = install(ptr->items[0], LOCAL);
     assert(loadAddr && loadVal && "Load instruction generation fails");
     loadVal->v.v = Builder.CreateLoad(loadAddr->v.v,ptr->items[0]);
-    return;
+}
+
+void createStore(struct quadline *ptr) {
+    struct id_entry *lhs, *rhs;
+    llvm::Value *r;
+
+    rhs = lookup(ptr->items[4], LOCAL);
+    lhs = lookup(ptr->items[2], LOCAL);
+    r = Builder.CreateLoad(rhs->v.v, ptr->items[4]);
+    Builder.CreateStore(r, lhs->v.v);
+}
+
+void createRef(struct quadline *ptr, int scope) {
+    struct id_entry *refVar, *refVal;
+
+    refVar = lookup(ptr->items[3], scope);
+    refVal = install(ptr->items[0], scope);
+    refVal->v.v = refVar->v.v;
+    refVal->u.ltype = refVar->u.ltype;
+    //refVal->v.v->getType()->dump();
+}
+
+void createBinOp(struct quadline *ptr) {
+    struct id_entry *op1, *op2;
+    llvm::Value *resultVal;
+    char op[strlen(ptr->items[3])];
+    char op_type[strlen(ptr->items[3])];
+
+    op1 = lookup(ptr->items[2], LOCAL);
+    op2 = lookup(ptr->items[4], LOCAL);
+
+    op1->v.v->getType()->dump();
+    op2->v.v->getType()->dump();
+
+    // parse '<operator><operator_type>' from quadline
+    strncpy(op, ptr->items[3], strlen(ptr->items[3])-1);
+    op[strlen(ptr->items[3])-1] = '\0';
+    op_type[0] = ptr->items[3][strlen(ptr->items[3])-1];
+    op_type[1] = '\0';
+
+    //std::cout << "op is " << op << '\n';
+    //std::cout << "op_type is " << op_type << '\n';
+
+    switch(*op) {
+        case '+':
+            if(op_type[0] == 'i')
+                resultVal = Builder.CreateAdd(op1->v.v, op2->v.v);
+            else // op_type == 'f'
+                resultVal = Builder.CreateFAdd(op1->v.v, op2->v.v);
+            break;
+        default:
+            break;
+    }
 }
 
 void createBitcode(struct quadline *ptr, struct id_entry *fn) {
-
-    std::cerr << "You need to implement this routine" << std::endl;
-    return;
+    struct id_entry *refVar, *refVal;
+    for(; ptr; ptr = ptr->next) {
+        switch (ptr->type) {
+            case ASSIGN:
+                std::cout << ptr->text << " ;ASSIGN" << '\n';
+                createAssign(ptr);
+                break;
+            case BINOP:
+                std::cout << ptr->text << " ;BINOP" << '\n';
+                createBinOp(ptr);
+                break;
+            case GLOBAL_REF:
+                std::cout << ptr->text << " ;GLOBAL_REF" << '\n';
+                createRef(ptr, GLOBAL);
+                break;
+            case PARAM_REF:
+                std::cout << ptr->text << " ;PARAM_REF" << '\n';
+                createRef(ptr, PARAM);
+                break;
+            case LOCAL_REF:
+                std::cout << ptr->text << " ;LOCAL_REF" << '\n';
+                createRef(ptr, LOCAL);
+                break;
+            case FUNC_END:
+                std::cout << ptr->text << " ;FUNC_END" << '\n';
+                break;
+            case STORE:
+                std::cout << ptr->text << " ;STORE" << '\n';
+                createStore(ptr);
+                break;
+            case LOAD:
+                std::cout << ptr->text << " ;LOAD" << '\n';
+                createLoad(ptr);
+                break;
+            case RETURN:
+                std::cout << ptr->text << " ;RETURN" << '\n';
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 void bitcodegen() {

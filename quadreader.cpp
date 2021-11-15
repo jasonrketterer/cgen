@@ -281,6 +281,10 @@ bool readinfunc(FILE *stdin) {
                 ptr->type = GLOBAL_REF;
             else if (*items[2]=='@')
                 ptr->type = LOAD;
+            else if ((strncmp(items[2], "cv", 2) == 0) &&
+                    (items[2][2] == 'i' || items[2][2] == 'f')) {
+                ptr->type = CONV;
+            }
             else
                 assert(0 && "Unknown quadruple type");
             ptr->numitems = 4;

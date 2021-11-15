@@ -23,7 +23,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -191,16 +191,14 @@ void allocaLocals(struct quadline **ptr) {
     }
 }
 
+/*
+ *  Create constant (int) value
+ */
 void createAssign(struct quadline *ptr) {
     struct id_entry *id_ptr;
-    llvm::Value *val;
-
+    int val = atoi(ptr->items[2]);
     id_ptr = install(ptr->items[0], LOCAL);
-    id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getInt32Ty(
-            TheContext), nullptr, id_ptr->i_name);
-    val = llvm::ConstantInt::get(TheContext,
-             APInt(32, llvm::StringRef(ptr->items[2]), 10));
-    Builder.CreateStore(val, id_ptr->v.v);
+    id_ptr->v.v = llvm::ConstantInt::get(llvm::Type::getInt32Ty(TheContext), val);
 }
 
 void createLoad(struct quadline *ptr) {
@@ -212,35 +210,36 @@ void createLoad(struct quadline *ptr) {
 
 void createStore(struct quadline *ptr) {
     struct id_entry *lhs, *rhs;
-    llvm::Value *r;
 
     rhs = lookup(ptr->items[4], LOCAL);
     lhs = lookup(ptr->items[2], LOCAL);
-    r = Builder.CreateLoad(rhs->v.v, ptr->items[4]);
-    Builder.CreateStore(r, lhs->v.v);
+    Builder.CreateStore(rhs->v.v, lhs->v.v);
 }
 
 void createRef(struct quadline *ptr, int scope) {
-    struct id_entry *refVar, *refVal;
+    struct id_entry *refVar, *refAddr;
 
     refVar = lookup(ptr->items[3], scope);
-    refVal = install(ptr->items[0], scope);
-    refVal->v.v = refVar->v.v;
-    refVal->u.ltype = refVar->u.ltype;
-    //refVal->v.v->getType()->dump();
+    refAddr = install(ptr->items[0], scope);
+    refAddr->v.v = refVar->v.v;
+}
+
+void createReturn(struct quadline *ptr) {
+    struct id_entry *id_ptr;
+
+    id_ptr = lookup(ptr->items[1], LOCAL);
+    Builder.CreateRet(id_ptr->v.v);
 }
 
 void createBinOp(struct quadline *ptr) {
-    struct id_entry *op1, *op2;
+    struct id_entry *op1, *op2, *res;
     llvm::Value *resultVal;
-    char op[strlen(ptr->items[3])];
+    char op     [strlen(ptr->items[3])];
     char op_type[strlen(ptr->items[3])];
+    char *resultName;
 
     op1 = lookup(ptr->items[2], LOCAL);
     op2 = lookup(ptr->items[4], LOCAL);
-
-    op1->v.v->getType()->dump();
-    op2->v.v->getType()->dump();
 
     // parse '<operator><operator_type>' from quadline
     strncpy(op, ptr->items[3], strlen(ptr->items[3])-1);
@@ -257,10 +256,61 @@ void createBinOp(struct quadline *ptr) {
                 resultVal = Builder.CreateAdd(op1->v.v, op2->v.v);
             else // op_type == 'f'
                 resultVal = Builder.CreateFAdd(op1->v.v, op2->v.v);
+            res = install(ptr->items[0], LOCAL);
+            res->v.v = resultVal;
+            break;
+        case '[': // array ref: res = op1[op2]
+            resultVal = Builder.CreateExtractElement(op1->v.v, llvm::ArrayRef<llvm::Type::getInt32Ty()>(op2->v.v));
+            res = install(ptr->items[0], LOCAL);
+            res->v.v = resultVal;
             break;
         default:
             break;
     }
+}
+
+void createConversion(struct quadline *ptr) {
+    struct id_entry *casting, *casted;
+    char cv_type;
+
+    casting = lookup(ptr->items[3], LOCAL);
+    casted = install(ptr->items[0], LOCAL);
+    cv_type = ptr->items[2][2];
+
+    if (cv_type == 'i') {
+        casted->v.v = Builder.CreateFPToSI(casting->v.v, llvm::Type::getInt32Ty(TheContext));
+    }
+    else  { // cv == 'f'
+        casted->v.v = Builder.CreateSIToFP(casting->v.v, llvm::Type::getDoubleTy(TheContext));
+    }
+}
+
+void createString(struct quadline *ptr) {
+    struct id_entry *id_ptr;
+
+    id_ptr = install(ptr->items[0], LOCAL);
+
+    // create global string POINTER since printf will expect this
+    id_ptr->v.v = Builder.CreateGlobalStringPtr(llvm::StringRef(ptr->items[2]));
+}
+
+void createFuncCall(struct quadline *ptr) {
+    struct id_entry *f;
+    llvm::SmallVector<Value *, 4> args;
+
+    // find function we want to call
+    f = lookup(ptr->items[3], GLOBAL);
+
+    // get the arguments
+    int numargs = atoi(ptr->items[4]);
+    struct id_entry *id_ptr;
+    for (int i = 0; i < numargs; ++i){
+        id_ptr = lookup(ptr->items[5+i], LOCAL);
+        args.push_back(id_ptr->v.v);
+    }
+
+    // call the function
+    Builder.CreateCall(f->v.f, args);
 }
 
 void createBitcode(struct quadline *ptr, struct id_entry *fn) {
@@ -298,8 +348,20 @@ void createBitcode(struct quadline *ptr, struct id_entry *fn) {
                 std::cout << ptr->text << " ;LOAD" << '\n';
                 createLoad(ptr);
                 break;
+            case FUNC_CALL:
+                std::cout << ptr->text << " ;FUNC_CALL" << '\n';
+                createFuncCall(ptr);
+            case STRING:
+                std::cout << ptr->text << " ;STRING" << '\n';
+                createString(ptr);
+                break;
+            case CONV:
+                std::cout << ptr->text << " ;CONV" << '\n';
+                createConversion(ptr);
+                break;
             case RETURN:
                 std::cout << ptr->text << " ;RETURN" << '\n';
+                createReturn(ptr);
                 break;
             default:
                 break;

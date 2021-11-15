@@ -23,7 +23,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support//TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -222,6 +222,8 @@ void createRef(struct quadline *ptr, int scope) {
     refVar = lookup(ptr->items[3], scope);
     refAddr = install(ptr->items[0], scope);
     refAddr->v.v = refVar->v.v;
+    if (scope == GLOBAL)
+        refAddr->gvar = refVar->gvar;
 }
 
 void createReturn(struct quadline *ptr) {
@@ -259,14 +261,25 @@ void createBinOp(struct quadline *ptr) {
             res = install(ptr->items[0], LOCAL);
             res->v.v = resultVal;
             break;
-        case '[': // array ref: res = op1[op2]
-            resultVal = Builder.CreateExtractElement(op1->v.v, llvm::ArrayRef<llvm::Type::getInt32Ty()>(op2->v.v));
-            res = install(ptr->items[0], LOCAL);
-            res->v.v = resultVal;
-            break;
         default:
             break;
     }
+}
+
+void createAddrArrayIndx(struct quadline *ptr) {
+    struct id_entry *arrayaddr, *arraybase, *arrayidx;
+
+    arraybase = lookup(ptr->items[2], GLOBAL);
+    arrayidx = lookup(ptr->items[4], LOCAL);
+
+    char array_type = ptr->items[3][2];
+
+    arrayaddr = install(ptr->items[0], LOCAL);
+    if(array_type == 'i')
+        arrayaddr->v.v = Builder.CreateConstGEP1_32(arraybase->gvar, llvm::dyn_cast<llvm::ConstantInt>(arrayidx->v.v)->getSExtValue());
+        //arrayaddr->v.v = Builder.CreateGEP(arraybase->gvar, std::vector<Value*>{arrayidx->v.v});
+    else // array_type == 'f'
+        arrayaddr->v.v = Builder.CreateGEP(llvm::Type::getDoubleTy(TheContext), arraybase->v.v, llvm::ArrayRef<llvm::Value *>(arrayidx->v.v));
 }
 
 void createConversion(struct quadline *ptr) {
@@ -337,6 +350,10 @@ void createBitcode(struct quadline *ptr, struct id_entry *fn) {
                 std::cout << ptr->text << " ;LOCAL_REF" << '\n';
                 createRef(ptr, LOCAL);
                 break;
+            case ADDR_ARRAY_INDEX:
+                std::cout << ptr->text << " ;ADDR_ARRAY_INDEX" << '\n';
+                createAddrArrayIndx(ptr);
+                break;
             case FUNC_END:
                 std::cout << ptr->text << " ;FUNC_END" << '\n';
                 break;
@@ -351,6 +368,7 @@ void createBitcode(struct quadline *ptr, struct id_entry *fn) {
             case FUNC_CALL:
                 std::cout << ptr->text << " ;FUNC_CALL" << '\n';
                 createFuncCall(ptr);
+                break;
             case STRING:
                 std::cout << ptr->text << " ;STRING" << '\n';
                 createString(ptr);

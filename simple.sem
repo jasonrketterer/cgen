@@ -1,0 +1,23 @@
+func main 1
+localloc x 1 4
+bgnstmt 4
+t1 := local x 0
+t2 := 2
+t3 := t1 =i t2
+bgnstmt 5
+t4 := local x 0
+t5 := @i t4
+t6 := 1
+t7 := t5 >i t6
+bt t7 B1
+br B2
+label L1
+bgnstmt 6
+t8 := "x is greater than 1\n"
+argi t8
+t9 := global printf
+t10 := fi t9 1 t8
+label L2
+B1=L1
+B2=L2
+fend

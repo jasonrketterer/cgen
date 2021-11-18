@@ -238,9 +238,9 @@ bool readinfunc(FILE *stdin) {
             makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
         }
         else if ((sscanf(line, "%s := fi %s %s %s",
-                         items[0],items[3],items[4],items[5]) == 4) ||
+                items[0],items[3],items[4],items[5]) == 4) ||
                  (sscanf(line, "%s := ff %s %s %s",
-                         items[0],items[3],items[4], items[5]) == 4)) {
+                items[0],items[3],items[4], items[5]) == 4)) {
 
             ptr = insline(bot, (struct quadline *) NULL, line);
             ptr->type = FUNC_CALL;
@@ -260,22 +260,6 @@ bool readinfunc(FILE *stdin) {
             ptr->numitems = numargs + 5;
             makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
         }
-        else if ((sscanf(line, "%s := fi %s %s",
-                         items[0],items[3],items[4]) == 3) ||
-                 (sscanf(line, "%s := ff %s %s",
-                         items[0],items[3],items[4]) == 3)) {
-            ptr = insline(bot, (struct quadline *) NULL, line);
-            ptr->type = FUNC_CALL;
-            int numargs = atoi(items[4]);
-            assert(numargs == 0 && "Number of arguments must be 0");
-            strcpy(items[1],":=");
-            if (strstr(ptr->text, "fi"))
-                strcpy(items[2],"fi");
-            else
-                strcpy(items[2],"ff");
-            ptr->numitems = 4;
-            makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
-        }
         else if (sscanf(line, "%s %s %s %s %s",
                 items[0], items[1], items[2], items[3], items[4]) == 5) {
             // binary operator
@@ -291,21 +275,16 @@ bool readinfunc(FILE *stdin) {
             makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
         }
         else if (sscanf(line, "%s %s %s %s",
-                        items[0], items[1], items[2], items[3]) == 4) {
+                items[0], items[1], items[2], items[3]) == 4) {
             ptr = insline(bot, (struct quadline *) NULL, line);
             if (strcmp(items[2],"global")==0)
                 ptr->type = GLOBAL_REF;
             else if (*items[2]=='@')
                 ptr->type = LOAD;
-            else if (strcmp(items[2],"cvf")==0)
-                ptr->type = CVF;
-            else if (strcmp(items[2],"cvi")==0)
-                ptr->type = CVI;
-            else if (strcmp(items[2],"-i")==0 ||
-                     strcmp(items[2],"-f")==0 ||
-                     strcmp(items[2],"~i")==0 ||
-                     strcmp(items[2],"~f")==0)
-                ptr->type = UNARY;
+            else if ((strncmp(items[2], "cv", 2) == 0) &&
+                    (items[2][2] == 'i' || items[2][2] == 'f')) {
+                ptr->type = CONV;
+            }
             else
                 assert(0 && "Unknown quadruple type");
             ptr->numitems = 4;

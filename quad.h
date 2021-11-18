@@ -83,7 +83,8 @@ typedef enum inst_type {
     STORE,
     LOAD,
     RETURN,
-    CONV,
+    CVF,
+    CVI,
     NONE
 } inst_type;
 

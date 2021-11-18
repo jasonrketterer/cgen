@@ -222,8 +222,10 @@ void createRef(struct quadline *ptr, int scope) {
     refVar = lookup(ptr->items[3], scope);
     refAddr = install(ptr->items[0], scope);
     refAddr->v.v = refVar->v.v;
-    if (scope == GLOBAL)
+    if (scope == GLOBAL) {
         refAddr->gvar = refVar->gvar;
+        refAddr->i_scope = GLOBAL;
+    }
 }
 
 void createReturn(struct quadline *ptr) {
@@ -254,48 +256,96 @@ void createBinOp(struct quadline *ptr) {
 
     switch(*op) {
         case '+':
-            if(op_type[0] == 'i')
+            if (op_type[0] == 'i')
                 resultVal = Builder.CreateAdd(op1->v.v, op2->v.v);
-            else // op_type == 'f'
+            else// op_type == 'f'
                 resultVal = Builder.CreateFAdd(op1->v.v, op2->v.v);
-            res = install(ptr->items[0], LOCAL);
-            res->v.v = resultVal;
+            break;
+        case '-':
+            if (op_type[0] == 'i')
+                resultVal = Builder.CreateSub(op1->v.v, op2->v.v);
+            else// op_type == 'f'
+                resultVal = Builder.CreateFSub(op1->v.v, op2->v.v);
+            break;
+        case '*':
+            if (op_type[0] == 'i')
+                resultVal = Builder.CreateMul(op1->v.v, op2->v.v);
+            else// op_type == 'f'
+                resultVal = Builder.CreateFMul(op1->v.v, op2->v.v);
+            break;
+        case '/':
+            if (op_type[0] == 'i')
+                resultVal = Builder.CreateSDiv(op1->v.v, op2->v.v);
+            else// op_type == 'f'
+                resultVal = Builder.CreateFDiv(op1->v.v, op2->v.v);
+            break;
+        case '%':
+            if (op_type[0] == 'i')
+                resultVal = Builder.CreateSRem(op1->v.v, op2->v.v);
+            else
+                resultVal = Builder.CreateFRem(op1->v.v, op2->v.v);
+            break;
+        case '|':
+            resultVal = Builder.CreateOr(op1->v.v, op2->v.v);
+            break;
+        case '>':
+            if (op[1] == '>') // '>>'
+                resultVal = Builder.CreateLShr(op1->v.v, op2->v.v);
+            else { // '>'
+                if (op_type[0] == 'i')
+                    resultVal = Builder.CreateICmpSGT(op1->v.v, op2->v.v);
+                else
+                    resultVal = Builder.CreateFCmpOGT(op1->v.v, op2->v.v);
+            }
+            break;
+        case '<':
+            if (op[1] == '<') // '<<'
+                resultVal = Builder.CreateShl(op1->v.v, op2->v.v);
+            else { // '<'
+                if (op_type[0] == 'i')
+                    resultVal = Builder.CreateICmpSGT(op1->v.v, op2->v.v);
+                else
+                    resultVal = Builder.CreateFCmpOLT(op1->v.v, op2->v.v);
+            }
             break;
         default:
             break;
     }
+    res = install(ptr->items[0], LOCAL);
+    res->v.v = resultVal;
 }
 
 void createAddrArrayIndx(struct quadline *ptr) {
     struct id_entry *arrayaddr, *arraybase, *arrayidx;
 
-    arraybase = lookup(ptr->items[2], GLOBAL);
+    arraybase = lookup(ptr->items[2], LOCAL);
     arrayidx = lookup(ptr->items[4], LOCAL);
 
-    char array_type = ptr->items[3][2];
+    //char array_type = ptr->items[3][2];
 
     arrayaddr = install(ptr->items[0], LOCAL);
-    if(array_type == 'i')
-        arrayaddr->v.v = Builder.CreateConstGEP1_32(arraybase->gvar, llvm::dyn_cast<llvm::ConstantInt>(arrayidx->v.v)->getSExtValue());
-        //arrayaddr->v.v = Builder.CreateGEP(arraybase->gvar, std::vector<Value*>{arrayidx->v.v});
-    else // array_type == 'f'
-        arrayaddr->v.v = Builder.CreateGEP(llvm::Type::getDoubleTy(TheContext), arraybase->v.v, llvm::ArrayRef<llvm::Value *>(arrayidx->v.v));
+    if (arraybase->i_scope == GLOBAL)
+        arrayaddr->v.v = Builder.CreateGEP(arraybase->gvar, std::vector<Value*>{arrayidx->v.v,
+                                       ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
+    else
+        arrayaddr->v.v = Builder.CreateGEP(arraybase->v.v, std::vector<Value*>{arrayidx->v.v,
+                                            ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
 }
 
-void createConversion(struct quadline *ptr) {
+void createIntConversion(struct quadline *ptr) {
     struct id_entry *casting, *casted;
-    char cv_type;
 
     casting = lookup(ptr->items[3], LOCAL);
     casted = install(ptr->items[0], LOCAL);
-    cv_type = ptr->items[2][2];
+    casted->v.v = Builder.CreateFPToSI(casting->v.v, llvm::Type::getInt32Ty(TheContext));
+}
 
-    if (cv_type == 'i') {
-        casted->v.v = Builder.CreateFPToSI(casting->v.v, llvm::Type::getInt32Ty(TheContext));
-    }
-    else  { // cv == 'f'
-        casted->v.v = Builder.CreateSIToFP(casting->v.v, llvm::Type::getDoubleTy(TheContext));
-    }
+void createFPConversion(struct quadline *ptr) {
+    struct id_entry *casting, *casted;
+
+    casting = lookup(ptr->items[3], LOCAL);
+    casted = install(ptr->items[0], LOCAL);
+    casted->v.v = Builder.CreateSIToFP(casting->v.v, llvm::Type::getDoubleTy(TheContext));
 }
 
 void createString(struct quadline *ptr) {
@@ -308,22 +358,54 @@ void createString(struct quadline *ptr) {
 }
 
 void createFuncCall(struct quadline *ptr) {
-    struct id_entry *f;
+    struct id_entry *f, *id_ptr;
+    llvm::Value *retval;
     llvm::SmallVector<Value *, 4> args;
 
     // find function we want to call
     f = lookup(ptr->items[3], GLOBAL);
 
-    // get the arguments
-    int numargs = atoi(ptr->items[4]);
-    struct id_entry *id_ptr;
-    for (int i = 0; i < numargs; ++i){
-        id_ptr = lookup(ptr->items[5+i], LOCAL);
-        args.push_back(id_ptr->v.v);
+    // check if there are args and get them
+    if (ptr->numitems > 4) {
+        // get the arguments
+        int numargs = atoi(ptr->items[4]);
+        for (int i = 0; i < numargs; ++i) {
+            id_ptr = lookup(ptr->items[5 + i], LOCAL);
+            args.push_back(id_ptr->v.v);
+        }
+        // call the function
+        retval = Builder.CreateCall(f->v.f, args);
     }
+    else
+        retval = Builder.CreateCall(f->v.f);
 
-    // call the function
-    Builder.CreateCall(f->v.f, args);
+    // install result to symbol table
+    id_ptr = install(ptr->items[0], LOCAL);
+    id_ptr->v.v = retval;
+}
+
+void createUnaryOp(struct quadline *ptr) {
+    struct id_entry *oper, *res;
+
+    oper = lookup(ptr->items[3], LOCAL);
+    res = install(ptr->items[0], LOCAL);
+
+    char op = ptr->items[2][0];
+    char op_type = ptr->items[2][1];
+
+    switch(op) {
+        case '-':
+            if (op_type == 'i')
+                res->v.v = Builder.CreateNeg(oper->v.v);
+            else // == 'f'
+                res->v.v = Builder.CreateFNeg(oper->v.v);
+            break;
+        case '~':
+            res->v.v = Builder.CreateNot(oper->v.v);
+            break;
+        default:
+            break;
+    }
 }
 
 void createBitcode(struct quadline *ptr, struct id_entry *fn) {
@@ -331,54 +413,66 @@ void createBitcode(struct quadline *ptr, struct id_entry *fn) {
     for(; ptr; ptr = ptr->next) {
         switch (ptr->type) {
             case ASSIGN:
-                std::cout << ptr->text << " ;ASSIGN" << '\n';
+                //std::cerr << ptr->text << " ;ASSIGN" << '\n';
                 createAssign(ptr);
                 break;
+            case UNARY:
+                //std::cerr << ptr->text << " ;UNARY" << '\n';
+                createUnaryOp(ptr);
+                break;
             case BINOP:
-                std::cout << ptr->text << " ;BINOP" << '\n';
+                //std::cerr << ptr->text << " ;BINOP" << '\n';
                 createBinOp(ptr);
                 break;
             case GLOBAL_REF:
-                std::cout << ptr->text << " ;GLOBAL_REF" << '\n';
+                //std::cerr << ptr->text << " ;GLOBAL_REF" << '\n';
                 createRef(ptr, GLOBAL);
                 break;
             case PARAM_REF:
-                std::cout << ptr->text << " ;PARAM_REF" << '\n';
+                //std::cerr << ptr->text << " ;PARAM_REF" << '\n';
                 createRef(ptr, PARAM);
                 break;
             case LOCAL_REF:
-                std::cout << ptr->text << " ;LOCAL_REF" << '\n';
+                //std::cerr << ptr->text << " ;LOCAL_REF" << '\n';
                 createRef(ptr, LOCAL);
                 break;
             case ADDR_ARRAY_INDEX:
-                std::cout << ptr->text << " ;ADDR_ARRAY_INDEX" << '\n';
+                //std::cerr << ptr->text << " ;ADDR_ARRAY_INDEX" << '\n';
                 createAddrArrayIndx(ptr);
                 break;
             case FUNC_END:
-                std::cout << ptr->text << " ;FUNC_END" << '\n';
+                //std::cerr << ptr->text << " ;FUNC_END" << '\n';
                 break;
             case STORE:
-                std::cout << ptr->text << " ;STORE" << '\n';
+                //std::cerr << ptr->text << " ;STORE" << '\n';
                 createStore(ptr);
                 break;
             case LOAD:
-                std::cout << ptr->text << " ;LOAD" << '\n';
+                //std::cerr << ptr->text << " ;LOAD" << '\n';
                 createLoad(ptr);
                 break;
             case FUNC_CALL:
-                std::cout << ptr->text << " ;FUNC_CALL" << '\n';
+                //std::cerr << ptr->text << " ;FUNC_CALL" << '\n';
                 createFuncCall(ptr);
                 break;
             case STRING:
-                std::cout << ptr->text << " ;STRING" << '\n';
+                //std::cerr << ptr->text << " ;STRING" << '\n';
                 createString(ptr);
                 break;
-            case CONV:
-                std::cout << ptr->text << " ;CONV" << '\n';
-                createConversion(ptr);
+            case CVF:
+                //std::cerr << ptr->text << " ;CVF" << '\n';
+                createFPConversion(ptr);
+                break;
+            case CVI:
+                //std::cerr << ptr->text << " ;CVI" << '\n';
+                createIntConversion(ptr);
+                break;
+            case BRANCH:
+                break;
+            case JUMP:
                 break;
             case RETURN:
-                std::cout << ptr->text << " ;RETURN" << '\n';
+                //std::cerr << ptr->text << " ;RETURN" << '\n';
                 createReturn(ptr);
                 break;
             default:

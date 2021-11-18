@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_FLAGS "-fpermissive -g -O0 -DDEBUG")
 set(CMAKE_BUILD_TYPE Debug)
 
-set (CMAKE_PREFIX_PATH "/Users/uh/LLVM/llvm-project-12.0.1/llvm/cmake-build-llvm-build")
+set (CMAKE_PREFIX_PATH "~/llvm-12/llvm-project-llvmorg-12.0.0/llvm/cmake-build-llvm-12-build/lib/cmake/llvm")
 find_package(LLVM REQUIRED CONFIG)
 
 add_definitions(${LLVM_DEFINITIONS})

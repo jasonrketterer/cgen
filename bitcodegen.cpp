@@ -408,71 +408,70 @@ void createUnaryOp(struct quadline *ptr) {
     }
 }
 
+void createBranch(struct quadline *ptr){
+    struct id_entry *cond;
+    //struct bblk *trueblk, *falseblk;
+
+    llvm::Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+    cond = lookup(ptr->items[1], LOCAL);
+
+    llvm::BasicBlock *trueblk = BasicBlock::Create(TheContext, ptr->blk->succs->ptr->label, TheFunction);
+    llvm::BasicBlock *falseblk = BasicBlock::Create(TheContext, ptr->blk->down->label);
+    Builder.CreateCondBr(cond->v.v, trueblk, falseblk);
+}
+
 void createBitcode(struct quadline *ptr, struct id_entry *fn) {
     struct id_entry *refVar, *refVal;
     for(; ptr; ptr = ptr->next) {
         switch (ptr->type) {
             case ASSIGN:
-                //std::cerr << ptr->text << " ;ASSIGN" << '\n';
                 createAssign(ptr);
                 break;
             case UNARY:
-                //std::cerr << ptr->text << " ;UNARY" << '\n';
                 createUnaryOp(ptr);
                 break;
             case BINOP:
-                //std::cerr << ptr->text << " ;BINOP" << '\n';
                 createBinOp(ptr);
                 break;
             case GLOBAL_REF:
-                //std::cerr << ptr->text << " ;GLOBAL_REF" << '\n';
                 createRef(ptr, GLOBAL);
                 break;
             case PARAM_REF:
-                //std::cerr << ptr->text << " ;PARAM_REF" << '\n';
                 createRef(ptr, PARAM);
                 break;
             case LOCAL_REF:
-                //std::cerr << ptr->text << " ;LOCAL_REF" << '\n';
                 createRef(ptr, LOCAL);
                 break;
             case ADDR_ARRAY_INDEX:
-                //std::cerr << ptr->text << " ;ADDR_ARRAY_INDEX" << '\n';
                 createAddrArrayIndx(ptr);
                 break;
             case FUNC_END:
-                //std::cerr << ptr->text << " ;FUNC_END" << '\n';
                 break;
             case STORE:
-                //std::cerr << ptr->text << " ;STORE" << '\n';
                 createStore(ptr);
                 break;
             case LOAD:
-                //std::cerr << ptr->text << " ;LOAD" << '\n';
                 createLoad(ptr);
                 break;
             case FUNC_CALL:
-                //std::cerr << ptr->text << " ;FUNC_CALL" << '\n';
                 createFuncCall(ptr);
                 break;
             case STRING:
-                //std::cerr << ptr->text << " ;STRING" << '\n';
                 createString(ptr);
                 break;
             case CVF:
-                //std::cerr << ptr->text << " ;CVF" << '\n';
                 createFPConversion(ptr);
                 break;
             case CVI:
-                //std::cerr << ptr->text << " ;CVI" << '\n';
                 createIntConversion(ptr);
                 break;
             case BRANCH:
+                createBranch(ptr);
                 break;
             case JUMP:
                 break;
             case RETURN:
-                //std::cerr << ptr->text << " ;RETURN" << '\n';
                 createReturn(ptr);
                 break;
             default:

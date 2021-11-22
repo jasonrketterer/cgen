@@ -1,6 +1,3 @@
-//
-// Created by Gang-Ryung Uh on 11/15/20.
-//
 #include <regex>
 #include <iostream>
 #include "quad.h"
@@ -81,19 +78,34 @@ void InitializeModuleAndPassManager() {
     char str[] = "printf";
     struct id_entry *iptr = install(str, GLOBAL);
     FunctionType* printfTy = FunctionType::get(Builder.getInt32Ty(),
-            Builder.getInt8PtrTy(), true);
+                                               Builder.getInt8PtrTy(), true);
     iptr->v.f = Function::Create(printfTy,Function::ExternalLinkage,
-            str, *TheModule);
+                                 str, *TheModule);
     iptr->v.f->setCallingConv(CallingConv::C);
     iptr->v.f->getArg(0)->setName("f");
+
+    // exit function call
+    char str2[] = "exit";
+    iptr = install(str2, GLOBAL);
+    FunctionType* exitfTy = FunctionType::get(Builder.getVoidTy(), Builder.getInt32Ty(), false);
+    iptr->v.f = Function::Create(exitfTy, Function::ExternalLinkage, str2, *TheModule);
+    iptr->v.f->setCallingConv(CallingConv::C);
+    iptr->v.f->getArg(0)->setName("f");
+
+    // getchar function call
+    char str4[] = "getchar";
+    iptr = install(str4, GLOBAL);
+    FunctionType* getcharTy = FunctionType::get(Builder.getInt32Ty(), false);
+    iptr->v.f = Function::Create(getcharTy, Function::ExternalLinkage, str4, *TheModule);
+    iptr->v.f->setCallingConv(CallingConv::C);
+    //iptr->v.f->getArg(0)->setName("f");
 }
 
 void OutputModule() {
     TheModule->print(outs(), nullptr);
 }
 
-static
-void createGlobal(struct id_entry *iptr) {
+static void createGlobal(struct id_entry *iptr) {
 
     if (iptr->i_type & T_ARRAY) {
         if (iptr->i_type & T_INT) {
@@ -122,7 +134,7 @@ void createGlobal(struct id_entry *iptr) {
 }
 
 static
-void createFunction(struct id_entry *fn, struct quadline **ptr) {
+        void createFunction(struct id_entry *fn, struct quadline **ptr) {
     std::vector<std::string> args;
     std::vector<llvm::Type *> typeVec;
 
@@ -141,10 +153,10 @@ void createFunction(struct id_entry *fn, struct quadline **ptr) {
 
     if (fn->i_type & T_INT)
         fn->u.ftype = FunctionType::get(Builder.getInt32Ty(),
-                                              typeVec, false);
+                                        typeVec, false);
     else
         fn->u.ftype = FunctionType::get(Builder.getDoubleTy(),
-                                              typeVec, false);
+                                        typeVec, false);
 
     Function *F =
             Function::Create(fn->u.ftype, Function::ExternalLinkage,
@@ -157,9 +169,9 @@ void createFunction(struct id_entry *fn, struct quadline **ptr) {
 }
 
 static
-void allocaFormals(struct quadline **ptr, llvm::Function *fn) {
+        void allocaFormals(struct quadline **ptr, llvm::Function *fn) {
     for (; (*ptr != NULL) && ((*ptr)->type == FORMAL_ALLOC);
-           *ptr = (*ptr)->next) {
+         *ptr = (*ptr)->next) {
         auto id_ptr = lookup((*ptr)->items[1], PARAM);
         assert(id_ptr && "local is missing");
         //Kaleidoscope addresses the initializer at this point, but we can't do that yet...
@@ -177,17 +189,17 @@ void allocaFormals(struct quadline **ptr, llvm::Function *fn) {
 }
 
 static
-void allocaLocals(struct quadline **ptr) {
+        void allocaLocals(struct quadline **ptr) {
     for (; (*ptr != NULL) && ((*ptr)->type == LOCAL_ALLOC);
-           *ptr = (*ptr)->next) {
+         *ptr = (*ptr)->next) {
         auto id_ptr = lookup((*ptr)->items[1], LOCAL);
         assert(id_ptr && "local is missing");
         if (id_ptr->i_type & T_INT)
             id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getInt32Ty(
-                    TheContext), nullptr, id_ptr->i_name);
+                                                       TheContext), nullptr, id_ptr->i_name);
         else
             id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getDoubleTy(
-                    TheContext), nullptr, id_ptr->i_name);
+                                                       TheContext), nullptr, id_ptr->i_name);
     }
 }
 
@@ -209,11 +221,14 @@ void createLoad(struct quadline *ptr) {
 }
 
 void createStore(struct quadline *ptr) {
-    struct id_entry *lhs, *rhs;
+    struct id_entry *lhs, *rhs, *res;
 
     rhs = lookup(ptr->items[4], LOCAL);
     lhs = lookup(ptr->items[2], LOCAL);
     Builder.CreateStore(rhs->v.v, lhs->v.v);
+
+    res = install(ptr->items[0], LOCAL);
+    res->v.v = rhs->v.v;
 }
 
 void createRef(struct quadline *ptr, int scope) {
@@ -288,9 +303,30 @@ void createBinOp(struct quadline *ptr) {
         case '|':
             resultVal = Builder.CreateOr(op1->v.v, op2->v.v);
             break;
+        case '&':
+            resultVal = Builder.CreateAnd(op1->v.v, op2->v.v);
+            break;
+        case '=': // ==
+            if (op_type[0] == 'i')
+                resultVal = Builder.CreateICmpEQ(op1->v.v, op2->v.v);
+            else
+                resultVal = Builder.CreateFCmpOEQ(op1->v.v, op2->v.v);
+            break;
+        case '!': // !=
+            if (op_type[0] == 'i')
+                resultVal = Builder.CreateICmpNE(op1->v.v, op2->v.v);
+            else
+                resultVal = Builder.CreateFCmpONE(op1->v.v, op2->v.v);
+            break;
         case '>':
             if (op[1] == '>') // '>>'
                 resultVal = Builder.CreateLShr(op1->v.v, op2->v.v);
+            else if (op[1] == '=') {
+                if (op_type[0] == 'i')
+                    resultVal = Builder.CreateICmpSGE(op1->v.v, op2->v.v);
+                else
+                    resultVal = Builder.CreateFCmpOGE(op1->v.v, op2->v.v);
+            }
             else { // '>'
                 if (op_type[0] == 'i')
                     resultVal = Builder.CreateICmpSGT(op1->v.v, op2->v.v);
@@ -301,9 +337,15 @@ void createBinOp(struct quadline *ptr) {
         case '<':
             if (op[1] == '<') // '<<'
                 resultVal = Builder.CreateShl(op1->v.v, op2->v.v);
+            else if (op[1] == '=') {
+                if (op_type[0] == 'i')
+                    resultVal = Builder.CreateICmpSLE(op1->v.v, op2->v.v);
+                else
+                    resultVal = Builder.CreateFCmpOLE(op1->v.v, op2->v.v);
+            }
             else { // '<'
                 if (op_type[0] == 'i')
-                    resultVal = Builder.CreateICmpSGT(op1->v.v, op2->v.v);
+                    resultVal = Builder.CreateICmpSLT(op1->v.v, op2->v.v);
                 else
                     resultVal = Builder.CreateFCmpOLT(op1->v.v, op2->v.v);
             }
@@ -326,10 +368,10 @@ void createAddrArrayIndx(struct quadline *ptr) {
     arrayaddr = install(ptr->items[0], LOCAL);
     if (arraybase->i_scope == GLOBAL)
         arrayaddr->v.v = Builder.CreateGEP(arraybase->gvar, std::vector<Value*>{arrayidx->v.v,
-                                       ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
+                           ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
     else
         arrayaddr->v.v = Builder.CreateGEP(arraybase->v.v, std::vector<Value*>{arrayidx->v.v,
-                                            ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
+                           ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
 }
 
 void createIntConversion(struct quadline *ptr) {
@@ -408,17 +450,62 @@ void createUnaryOp(struct quadline *ptr) {
     }
 }
 
+extern struct bblk *findtarget(char *label);
+
 void createBranch(struct quadline *ptr){
-    struct id_entry *cond;
-    //struct bblk *trueblk, *falseblk;
+    struct id_entry *cond, *tb, *fb;
+    struct quadline *fallthrough;
+    struct bblk *trueblk, *falseblk;
 
     llvm::Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
     cond = lookup(ptr->items[1], LOCAL);
+    trueblk = findtarget(ptr->items[2]);
+    tb = lookup(ptr->items[2], LOCAL);
 
-    llvm::BasicBlock *trueblk = BasicBlock::Create(TheContext, ptr->blk->succs->ptr->label, TheFunction);
-    llvm::BasicBlock *falseblk = BasicBlock::Create(TheContext, ptr->blk->down->label);
-    Builder.CreateCondBr(cond->v.v, trueblk, falseblk);
+    // look for next inst which should be a br inst to find false block
+    fallthrough = ptr->next;
+    falseblk = findtarget(fallthrough->items[1]);
+    fb = lookup(fallthrough->items[1], LOCAL);
+
+    llvm::BasicBlock *truebblk, *falsebblk;
+
+    if (tb->v.b)
+        truebblk = tb->v.b;
+    else {
+        truebblk = BasicBlock::Create(TheContext, trueblk->label, TheFunction);
+        tb->v.b = truebblk;
+    }
+
+    if (fb->v.b)
+        falsebblk = fb->v.b;
+    else {
+        falsebblk = BasicBlock::Create(TheContext, falseblk->label, TheFunction);
+        fb->v.b = falsebblk;
+    }
+    Builder.CreateCondBr(cond->v.v, truebblk, falsebblk);
+}
+
+void createJump(struct quadline *ptr) {
+    struct id_entry *target;
+    struct bblk *tblk;
+
+    if (ptr->prev != nullptr && strcmp(ptr->prev->items[0], "bt") != 0 ||
+        ptr->blk->lines == ptr->blk->lineend) {
+        llvm::Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+        target = lookup(ptr->items[1], LOCAL);
+        tblk = findtarget(ptr->items[1]);
+
+        llvm::BasicBlock *ltblk;
+        if (target->v.b)
+            ltblk = target->v.b;
+        else {
+            ltblk = BasicBlock::Create(TheContext, tblk->label, TheFunction);
+            target->v.b = ltblk;
+        }
+        Builder.CreateBr(ltblk);
+    }
 }
 
 void createBitcode(struct quadline *ptr, struct id_entry *fn) {
@@ -470,6 +557,7 @@ void createBitcode(struct quadline *ptr, struct id_entry *fn) {
                 createBranch(ptr);
                 break;
             case JUMP:
+                createJump(ptr);
                 break;
             case RETURN:
                 createReturn(ptr);
@@ -511,12 +599,38 @@ void bitcodegen() {
     allocaLocals(&ptr);
     createBitcode(ptr,fn);
 
+    // check if br inst needs to be inserted at end of top block
+    if (top->lineend->type != JUMP && top->lineend->type != RETURN && top->down != nullptr) {
+        auto succ = lookup(top->down->label, LOCAL);
+        // add bitcode to the down basic bl
+        llvm::BasicBlock *ltblk;
+        if (succ->v.b)
+            ltblk = succ->v.b;
+        else {
+            ltblk = BasicBlock::Create(TheContext, top->down->label, fn->v.f);
+            succ->v.b = ltblk;
+        }
+        Builder.CreateBr(ltblk);
+    }
+
     for (auto bblk = top->down; bblk ; bblk=bblk->down) {
         auto bb = lookup(bblk->label, LOCAL);
         if (bb->v.b == nullptr)
             bb->v.b = BasicBlock::Create(TheContext, bblk->label, fn->v.f);
         Builder.SetInsertPoint(bb->v.b);
         createBitcode(bblk->lines, fn);
+        if (bblk->lineend->type != JUMP && bblk->lineend->type != RETURN && bblk->down != nullptr) {
+            auto succ = lookup(bblk->down->label, LOCAL);
+            // add bitcode to the down basic bl
+            llvm::BasicBlock *ltblk;
+            if (succ->v.b)
+                ltblk = succ->v.b;
+            else {
+                ltblk = BasicBlock::Create(TheContext, bblk->down->label, fn->v.f);
+                succ->v.b = ltblk;
+            }
+            Builder.CreateBr(ltblk);
+        }
     }
     return;
 }

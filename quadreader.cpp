@@ -18,7 +18,7 @@ static char quad_type_names[][MAXLINE] = {
         "ASSIGN","UNARY","BINOP","JUMP","BRANCH","LOCAL_ALLOC","LOCAL_REF",
         "FORMAL_ALLOC","PARAM_REF","GLOBAL_ALLOC","GLOBAL_REF","CONSTANT",
         "STRING","FUNC_BEGIN","FUNC_END","FUNC_CALL","ADDR_ARRAY_INDEX",
-        "STORE","LOAD","RETURN","NONE"
+        "STORE","LOAD","RETURN","CVF", "CVI","NONE"
 };
 
 void dumpblk(struct bblk *cblk) {
@@ -63,12 +63,14 @@ void backpatching() {
             }
         }
         if (cblk->lineend && strcmp(cblk->lineend->items[0], "br") == 0) {
-                bptr = inbplist(gbp, cblk->lineend->items[1]);
+            bptr = inbplist(gbp, cblk->lineend->items[1]);
+            if (bptr) {
                 replacestring(&cblk->lineend->text, bptr->ptr->bl,
                               bptr->ptr->tl);
                 replacestring(&cblk->lineend->items[1], bptr->ptr->bl,
                               bptr->ptr->tl);
                 deletefrombplist(&gbp, bptr->ptr->bl);
+            }
         }
     }
 }
@@ -197,7 +199,7 @@ bool readinfunc(FILE *stdin) {
 
         }
         else if (sscanf(line, "%s := local %s %d",
-                items[0], items[3], &offset) == 3) {
+                        items[0], items[3], &offset) == 3) {
             ptr = insline(bot, (struct quadline *) NULL, line);
             ptr->type = LOCAL_REF;
             strcpy(items[1], ":=");
@@ -222,7 +224,7 @@ bool readinfunc(FILE *stdin) {
             id->i_numelem = size / id->i_width;
         }
         else if (sscanf(line, "%s := param %s %d",
-                items[0],items[3],&offset) == 3) {
+                        items[0],items[3],&offset) == 3) {
             ptr = insline(bot, (struct quadline *) NULL, line);
             ptr->type = PARAM_REF;
             strcpy(items[1], ":=");
@@ -231,7 +233,7 @@ bool readinfunc(FILE *stdin) {
             makeinstitems(ptr->text,ptr->numitems, items, &ptr->items);
         }
         else if (sscanf(line, "%s %s \"%[^\"]\"",
-                items[0],items[1],items[2]) == 3) {
+                        items[0],items[1],items[2]) == 3) {
             ptr = insline(bot, (struct quadline *) NULL, line);
             ptr->type = STRING;
             ptr->numitems = 3;
@@ -273,11 +275,11 @@ bool readinfunc(FILE *stdin) {
                 strcpy(items[2],"fi");
             else
                 strcpy(items[2],"ff");
-            ptr->numitems = 4;
+            ptr->numitems = 5;
             makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
         }
         else if (sscanf(line, "%s %s %s %s %s",
-                items[0], items[1], items[2], items[3], items[4]) == 5) {
+                        items[0], items[1], items[2], items[3], items[4]) == 5) {
             // binary operator
             ptr = insline(bot, (struct quadline *) NULL, line);
             ptr->numitems = 5;
@@ -302,9 +304,7 @@ bool readinfunc(FILE *stdin) {
             else if (strcmp(items[2],"cvi")==0)
                 ptr->type = CVI;
             else if (strcmp(items[2],"-i")==0 ||
-                     strcmp(items[2],"-f")==0 ||
-                     strcmp(items[2],"~i")==0 ||
-                     strcmp(items[2],"~f")==0)
+                     strcmp(items[2],"-f")==0)
                 ptr->type = UNARY;
             else
                 assert(0 && "Unknown quadruple type");
@@ -312,7 +312,7 @@ bool readinfunc(FILE *stdin) {
             makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
         }
         else if (sscanf(line, "%s %s %s",
-                items[0], items[1], items[2]) == 3) {
+                        items[0], items[1], items[2]) == 3) {
             ptr = insline(bot, (struct quadline *) NULL, line);
             ptr->numitems = 3;
             makeinstitems(ptr->text, ptr->numitems, items, &ptr->items);
@@ -426,6 +426,10 @@ bool readinfunc(FILE *stdin) {
 int main(int argc, char *argv[]) {
 
     InitializeModuleAndPassManager();
+    //FILE *inf = fopen("test1.sem","r");
+    //FILE *inf = fopen("test1.sem","r");
+
+    //while (readinfunc(inf)) {
     while (readinfunc(stdin)) {
         backpatching();
         setupcontrolflow();

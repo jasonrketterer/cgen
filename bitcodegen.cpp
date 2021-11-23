@@ -133,8 +133,7 @@ static void createGlobal(struct id_entry *iptr) {
         iptr->gvar->setInitializer(ConstantAggregateZero::get(iptr->u.ltype));
 }
 
-static
-        void createFunction(struct id_entry *fn, struct quadline **ptr) {
+static void createFunction(struct id_entry *fn, struct quadline **ptr) {
     std::vector<std::string> args;
     std::vector<llvm::Type *> typeVec;
 
@@ -168,8 +167,7 @@ static
     fn->v.f = F;
 }
 
-static
-        void allocaFormals(struct quadline **ptr, llvm::Function *fn) {
+static void allocaFormals(struct quadline **ptr, llvm::Function *fn) {
     for (; (*ptr != NULL) && ((*ptr)->type == FORMAL_ALLOC);
          *ptr = (*ptr)->next) {
         auto id_ptr = lookup((*ptr)->items[1], PARAM);
@@ -188,18 +186,36 @@ static
     }
 }
 
-static
-        void allocaLocals(struct quadline **ptr) {
+static void allocaLocals(struct quadline **ptr) {
     for (; (*ptr != NULL) && ((*ptr)->type == LOCAL_ALLOC);
          *ptr = (*ptr)->next) {
         auto id_ptr = lookup((*ptr)->items[1], LOCAL);
         assert(id_ptr && "local is missing");
-        if (id_ptr->i_type & T_INT)
-            id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getInt32Ty(
-                                                       TheContext), nullptr, id_ptr->i_name);
-        else
-            id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getDoubleTy(
-                                                       TheContext), nullptr, id_ptr->i_name);
+
+        if (id_ptr->i_type & T_ARRAY) {
+            if (id_ptr->i_type & T_INT) {
+                auto vecType = ArrayType::get(
+                        Type::getInt32Ty(TheContext),id_ptr->i_numelem);
+                id_ptr->u.ltype = vecType;
+            }
+            else {
+                auto vecType = ArrayType::get(
+                        Type::getDoubleTy(TheContext),id_ptr->i_numelem);
+                id_ptr->u.ltype = vecType;
+            }
+            id_ptr->v.v = Builder.CreateAlloca(id_ptr->u.ltype,llvm::ConstantInt::get(llvm::Type::getInt32Ty(TheContext), id_ptr->i_numelem), id_ptr->i_name);
+        }
+        else {
+            if (id_ptr->i_type & T_INT) {
+                id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getInt32Ty(
+                                TheContext), nullptr, id_ptr->i_name);
+                id_ptr->u.ltype = Builder.getInt32Ty();
+            } else {
+                id_ptr->v.v = Builder.CreateAlloca(llvm::Type::getDoubleTy(
+                                TheContext), nullptr, id_ptr->i_name);
+                id_ptr->u.ltype = Builder.getDoubleTy();
+            }
+        }
     }
 }
 
@@ -490,22 +506,23 @@ void createJump(struct quadline *ptr) {
     struct id_entry *target;
     struct bblk *tblk;
 
-    if (ptr->prev != nullptr && strcmp(ptr->prev->items[0], "bt") != 0 ||
-        ptr->blk->lines == ptr->blk->lineend) {
-        llvm::Function *TheFunction = Builder.GetInsertBlock()->getParent();
+    if (ptr->prev != nullptr)
+        if (ptr->prev->type == BRANCH || ptr->prev->type == RETURN)
+            return;
 
-        target = lookup(ptr->items[1], LOCAL);
-        tblk = findtarget(ptr->items[1]);
+    llvm::Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
-        llvm::BasicBlock *ltblk;
-        if (target->v.b)
-            ltblk = target->v.b;
-        else {
-            ltblk = BasicBlock::Create(TheContext, tblk->label, TheFunction);
-            target->v.b = ltblk;
-        }
-        Builder.CreateBr(ltblk);
+    target = lookup(ptr->items[1], LOCAL);
+    tblk = findtarget(ptr->items[1]);
+
+    llvm::BasicBlock *ltblk;
+    if (target->v.b)
+        ltblk = target->v.b;
+    else {
+        ltblk = BasicBlock::Create(TheContext, tblk->label, TheFunction);
+        target->v.b = ltblk;
     }
+    Builder.CreateBr(ltblk);
 }
 
 void createBitcode(struct quadline *ptr, struct id_entry *fn) {
@@ -612,9 +629,16 @@ void bitcodegen() {
         }
         Builder.CreateBr(ltblk);
     }
+    extern void deleteblk(struct bblk *cblk);
 
     for (auto bblk = top->down; bblk ; bblk=bblk->down) {
         auto bb = lookup(bblk->label, LOCAL);
+
+        // if fend is the only instruction in the block, skip it
+        if (bblk->lines == bblk->lineend && strcmp(bblk->lines->text, "fend") == 0) {
+            //deleteblk(bblk);
+            continue;
+        }
         if (bb->v.b == nullptr)
             bb->v.b = BasicBlock::Create(TheContext, bblk->label, fn->v.f);
         Builder.SetInsertPoint(bb->v.b);

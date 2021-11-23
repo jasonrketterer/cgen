@@ -383,11 +383,9 @@ void createAddrArrayIndx(struct quadline *ptr) {
 
     arrayaddr = install(ptr->items[0], LOCAL);
     if (arraybase->i_scope == GLOBAL)
-        arrayaddr->v.v = Builder.CreateGEP(arraybase->gvar, std::vector<Value*>{arrayidx->v.v,
-                           ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
+        arrayaddr->v.v = Builder.CreateInBoundsGEP(arraybase->gvar, std::vector<Value*>{ConstantInt::get(Type::getInt32Ty(TheContext), 0), arrayidx->v.v,});
     else
-        arrayaddr->v.v = Builder.CreateGEP(arraybase->v.v, std::vector<Value*>{arrayidx->v.v,
-                           ConstantInt::get(Type::getInt32Ty(TheContext), 0)});
+        arrayaddr->v.v = Builder.CreateInBoundsGEP(arraybase->v.v, std::vector<Value*>{ConstantInt::get(Type::getInt32Ty(TheContext), 0), arrayidx->v.v});
 }
 
 void createIntConversion(struct quadline *ptr) {

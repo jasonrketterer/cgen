@@ -1,3 +1,11 @@
+/*
+ *  Jason Ketterer
+ *  COP 4620
+ *  cgen final project
+ *
+ *  Converts quadruple IR to LLVM IR
+ */
+
 #include <regex>
 #include <iostream>
 #include "quad.h"
@@ -20,7 +28,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support//TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -282,9 +290,6 @@ void createBinOp(struct quadline *ptr) {
     op_type[0] = ptr->items[3][strlen(ptr->items[3])-1];
     op_type[1] = '\0';
 
-    //std::cout << "op is " << op << '\n';
-    //std::cout << "op_type is " << op_type << '\n';
-
     switch(*op) {
         case '+':
             if (op_type[0] == 'i')
@@ -337,7 +342,7 @@ void createBinOp(struct quadline *ptr) {
         case '>':
             if (op[1] == '>') // '>>'
                 resultVal = Builder.CreateLShr(op1->v.v, op2->v.v);
-            else if (op[1] == '=') {
+            else if (op[1] == '=') { // '>='
                 if (op_type[0] == 'i')
                     resultVal = Builder.CreateICmpSGE(op1->v.v, op2->v.v);
                 else
@@ -354,7 +359,7 @@ void createBinOp(struct quadline *ptr) {
             if (op[1] == '<') // '<<'
                 resultVal = Builder.CreateShl(op1->v.v, op2->v.v);
             else if (op[1] == '=') {
-                if (op_type[0] == 'i')
+                if (op_type[0] == 'i') // '<='
                     resultVal = Builder.CreateICmpSLE(op1->v.v, op2->v.v);
                 else
                     resultVal = Builder.CreateFCmpOLE(op1->v.v, op2->v.v);
@@ -379,11 +384,9 @@ void createAddrArrayIndx(struct quadline *ptr) {
     arraybase = lookup(ptr->items[2], LOCAL);
     arrayidx = lookup(ptr->items[4], LOCAL);
 
-    //char array_type = ptr->items[3][2];
-
     arrayaddr = install(ptr->items[0], LOCAL);
     if (arraybase->i_scope == GLOBAL)
-        arrayaddr->v.v = Builder.CreateInBoundsGEP(arraybase->gvar, std::vector<Value*>{ConstantInt::get(Type::getInt32Ty(TheContext), 0), arrayidx->v.v,});
+        arrayaddr->v.v = Builder.CreateInBoundsGEP(arraybase->gvar, std::vector<Value*>{ConstantInt::get(Type::getInt32Ty(TheContext), 0), arrayidx->v.v});
     else
         arrayaddr->v.v = Builder.CreateInBoundsGEP(arraybase->v.v, std::vector<Value*>{ConstantInt::get(Type::getInt32Ty(TheContext), 0), arrayidx->v.v});
 }
@@ -409,8 +412,18 @@ void createString(struct quadline *ptr) {
 
     id_ptr = install(ptr->items[0], LOCAL);
 
+    std::string str = ptr->items[2];
+
+    // formatting so that string will print properly (escaped seqs are recognized) in shell
+    str = std::regex_replace(str,std::regex("\\\\r"),"\r");
+    str = std::regex_replace(str,std::regex("\\\\n"),"\n");
+    str = std::regex_replace(str,std::regex("\\\\f"),"\f");
+    str = std::regex_replace(str,std::regex("\\\\t"),"\t");
+    str = std::regex_replace(str,std::regex("\\\\\""),"\"");
+
     // create global string POINTER since printf will expect this
-    id_ptr->v.v = Builder.CreateGlobalStringPtr(llvm::StringRef(ptr->items[2]));
+    //id_ptr->v.v = Builder.CreateGlobalStringPtr(llvm::StringRef(ptr->items[2]));
+    id_ptr->v.v = Builder.CreateGlobalStringPtr(llvm::StringRef(str));
 }
 
 void createFuncCall(struct quadline *ptr) {
@@ -433,6 +446,7 @@ void createFuncCall(struct quadline *ptr) {
         retval = Builder.CreateCall(f->v.f, args);
     }
     else
+        // call function with no args
         retval = Builder.CreateCall(f->v.f);
 
     // install result to symbol table
@@ -449,11 +463,11 @@ void createUnaryOp(struct quadline *ptr) {
     char op = ptr->items[2][0];
     char op_type = ptr->items[2][1];
 
-    switch(op) {
+    switch (op) {
         case '-':
             if (op_type == 'i')
                 res->v.v = Builder.CreateNeg(oper->v.v);
-            else // == 'f'
+            else// == 'f'
                 res->v.v = Builder.CreateFNeg(oper->v.v);
             break;
         case '~':
@@ -463,10 +477,9 @@ void createUnaryOp(struct quadline *ptr) {
             break;
     }
 }
-
 extern struct bblk *findtarget(char *label);
 
-void createBranch(struct quadline *ptr){
+void createBranch(struct quadline *ptr) {
     struct id_entry *cond, *tb, *fb;
     struct quadline *fallthrough;
     struct bblk *trueblk, *falseblk;
@@ -477,7 +490,7 @@ void createBranch(struct quadline *ptr){
     trueblk = findtarget(ptr->items[2]);
     tb = lookup(ptr->items[2], LOCAL);
 
-    // look for next inst which should be a br inst to find false block
+    // look for next inst, which should be a 'br' inst, to find false block
     fallthrough = ptr->next;
     falseblk = findtarget(fallthrough->items[1]);
     fb = lookup(fallthrough->items[1], LOCAL);
@@ -504,6 +517,7 @@ void createJump(struct quadline *ptr) {
     struct id_entry *target;
     struct bblk *tblk;
 
+    // don't emit code if there was a preceding 'bt' or 'ret' quad
     if (ptr->prev != nullptr)
         if (ptr->prev->type == BRANCH || ptr->prev->type == RETURN)
             return;
@@ -627,16 +641,14 @@ void bitcodegen() {
         }
         Builder.CreateBr(ltblk);
     }
-    extern void deleteblk(struct bblk *cblk);
 
     for (auto bblk = top->down; bblk ; bblk=bblk->down) {
         auto bb = lookup(bblk->label, LOCAL);
 
-        // if fend is the only instruction in the block, skip it
-        if (bblk->lines == bblk->lineend && strcmp(bblk->lines->text, "fend") == 0) {
-            //deleteblk(bblk);
+        // if 'fend' is the only instruction in the block, skip it
+        if (bblk->lines == bblk->lineend && strcmp(bblk->lines->text, "fend") == 0)
             continue;
-        }
+
         if (bb->v.b == nullptr)
             bb->v.b = BasicBlock::Create(TheContext, bblk->label, fn->v.f);
         Builder.SetInsertPoint(bb->v.b);
